@@ -1,0 +1,83 @@
+# build_dataset_.py
+
+import os, json, pickle, datetime
+import numpy as np
+import rasterio
+from rasterio.warp import reproject, Resampling
+from tqdm import tqdm
+
+# User configuration
+mapping_path = r"..."
+s1_dir       = r"..."
+s2_dir       = r"..."
+out_dir      = r"..."
+os.makedirs(out_dir, exist_ok=True)
+
+# Sentinel-1 channels: VV/VH
+EPS = 1e-6
+
+# Load mapping between image pairs
+with open(mapping_path) as f:
+    mapping = json.load(f)
+    pairs = list(mapping.items())
+
+# Get reference image size and geoinformation
+with rasterio.open(os.path.join(s2_dir, next(x for x in os.listdir(s2_dir) if x.endswith(".tif")))) as ref:
+    dst_tr, dst_crs = ref.transform, ref.crs
+    H, W = ref.height, ref.width
+
+s1_seq = []   # (T, H, W, 2)
+s2_ndvi = []  # (T, H, W)
+s2_mask = []  # (T, H, W)
+dates = []
+
+# Process all date pairs
+for s1_date, s2_date in tqdm(pairs, desc="Processing pairs"):
+    try:
+        # Read S1 VV/VH
+        with rasterio.open(os.path.join(s1_dir, f"S1_{s1_date}.tif")) as src:
+            vv = src.read(1).astype(np.float32)
+            vh = src.read(2).astype(np.float32)
+        vv = np.nan_to_num(vv)
+        vh = np.nan_to_num(vh)
+        s1_pair = np.stack([vv, vh], axis=-1)  # (H, W, 2)
+
+        # Read NDVI + CloudMask
+        with rasterio.open(os.path.join(s2_dir, f"NDVI_CloudMask_{s2_date}_WGS84.tif")) as src:
+            ndvi  = src.read(1).astype(np.float32)
+            mask  = src.read(2).astype(np.uint8)  # cloud == 0 means valid
+
+            # Apply geographic reprojection (S1 needs reprojecting)
+            s1_final = np.zeros((H, W, 2), dtype=np.float32)
+            for i in range(2):
+                reproject(
+                    s1_pair[..., i], s1_final[..., i],
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=dst_tr,
+                    dst_crs=dst_crs,
+                    resampling=Resampling.bilinear
+                )
+
+        # Store parameters
+        s1_seq.append(s1_final)  # (H, W, 2)
+        s2_ndvi.append(ndvi)
+        s2_mask.append(mask)
+        dates.append(s2_date)
+
+    except Exception as e:
+        print(f"[Error] {s1_date}/{s2_date}: {e}")
+        continue
+
+s1_seq = np.stack(s1_seq)    # (T, H, W, 2)
+s2_ndvi = np.stack(s2_ndvi)  # (T, H, W)
+s2_mask = np.stack(s2_mask)  # (T, H, W)
+
+# Save results
+np.save(os.path.join(out_dir, "S1_stack_vv_vh.npy"), s1_seq)
+np.save(os.path.join(out_dir, "S2_ndvi_masked.npy"), s2_ndvi)
+np.save(os.path.join(out_dir, "S2_cloudmask.npy"), s2_mask)
+with open(os.path.join(out_dir, "dates.json"), "w") as f:
+    json.dump(dates, f, indent=2)
+
+print("\n✅ SF NDVI gap-filling compatible dataset saved to:", out_dir)
