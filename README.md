@@ -1,7 +1,7 @@
 <img width="3321" height="726" alt="1" src="https://github.com/user-attachments/assets/8e24a246-bc79-485f-b035-30e1c9b46037" /># CRF-Net
 <img width="2029" height="2886" alt="CNN-RNN散点对比" src="https://github.com/user-attachments/assets/25e528aa-212e-4b1e-8910-d0d3b33c250a" />
 
-Cloud-Resilient Fusion Network (CRF-Net)
+**Cloud-Resilient Fusion Network (CRF-Net)**
 High-Resolution NDVI Reconstruction for Carbon Flux Assessment in Tropical Cloudy Regions
 
 This repository provides the implementation of CRF-Net, a deep learning framework specifically designed to reconstruct high-resolution NDVI time series in tropical regions with persistent cloud cover. The approach integrates SAR backscatter features from Sentinel-1 and optical NDVI data from Sentinel-2 in a unified end-to-end architecture, enabling accurate gap-filling during extended cloudy periods and facilitating downstream ecological applications such as carbon flux estimation (NPP, Rh, NEP) and landscape pattern analysis.
