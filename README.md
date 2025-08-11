@@ -27,3 +27,15 @@ NDVI time series reconstruction in cloudy regions.
 Pixel-level carbon flux estimation (NPP, Rh, NEP) at 10-m resolution.
 
 Landscape ecology analysis using reconstructed vegetation indices.
+
+Data
+Sentinel-1: VV & VH backscatter time series.
+
+Sentinel-2: Cloud-masked NDVI (Level-2A, 10 m).
+
+Temporal Coverage: 2020–2024 (example).
+
+Spatial Resolution: 10 m, study region Kuala Selangor, Malaysia.
+
+⚠ Due to the large size of the dataset, experimental data can be obtained upon request via email:
+jiapengfei97@gmail.com
