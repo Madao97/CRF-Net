@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+evaluate_ndvi.py
+
+- Custom white→Jet gradient colormap, pure white when H2d=0
+- Do not truncate density, fully show error distribution
+- Use Times New Roman font, font size configurable via global variable
+- Remove grid, thicken axis lines, comply with top-tier journal figure style
+- Fix scatter density plot axis to [-0.5, 1], equal aspect ratio and identical tick marks
+- Do not show MAPE, do not add title or N info on plot
+- Output per-date CSV + scatter plot for each frame; output annual metrics.txt + scatter plot
+"""
+
+import os, json, csv
+import numpy as np
+import rasterio
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap, Normalize
+from scipy.ndimage import gaussian_filter
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from tqdm import tqdm
+
+# ─── Global style settings ───────────────────────────────────────────
+FONT_FAMILY = 'Times New Roman'
+FONT_SIZE   = 16
+plt.rcParams.update({
+    'font.family': FONT_FAMILY,
+    'font.size': FONT_SIZE,
+    'axes.linewidth':    1.0,
+    'xtick.direction':   'out',
+    'ytick.direction':   'out',
+    'xtick.major.width': 1.0,
+    'ytick.major.width': 1.0,
+    'xtick.major.size':  4,
+    'ytick.major.size':  4,
+})
+# ─────────────────────────────────────────────────────────────────────
+
+# ─── white→Jet gradient colormap ─────────────────────────────────────
+_base_jet = plt.get_cmap('jet', 256)
+_colors   = _base_jet(np.linspace(0, 1, 256))
+_colors[0] = [1, 1, 1, 1]
+cmap_white_jet = LinearSegmentedColormap.from_list('white_jet', _colors)
+# ─────────────────────────────────────────────────────────────────────
+
+# === User configuration ===
+DATA_DIR = r"..."
+PRED_DIR = os.path.join(DATA_DIR, "crf_predicted_ndvi")
+VAL_PATH = os.path.join(DATA_DIR, "Validation_set", "val_coords.npy")
+OUT_DIR  = os.path.join(DATA_DIR, "evaluation_result")
+os.makedirs(OUT_DIR, exist_ok=True)
+plots_dir = os.path.join(OUT_DIR, "plots1")
+os.makedirs(plots_dir, exist_ok=True)
+PER_DATE_CSV = os.path.join(OUT_DIR, "per_date_metrics.csv")
+METRICS_TXT  = os.path.join(OUT_DIR, "metrics.txt")
+
+# === Load date list ===
+with open(os.path.join(DATA_DIR, "dates.json"), "r") as f:
+    dates = json.load(f)
+
+# === Load true NDVI ===
+NDVI_true = np.load(os.path.join(DATA_DIR, "S2_ndvi_masked.npy"))  # (T,H,W)
+
+# === Build or load prediction stack ===
+pred_stack = os.path.join(PRED_DIR, "NDVI_pred.npy")
+if os.path.exists(pred_stack):
+    NDVI_pred = np.load(pred_stack)
+else:
+    NDVI_pred = np.zeros_like(NDVI_true, dtype=np.float32)
+    for i, d in enumerate(tqdm(dates, desc="Loading sf preds")):
+        fp = os.path.join(PRED_DIR, f"NDVI_Predict_{d}.tif")
+        with rasterio.open(fp) as src:
+            NDVI_pred[i] = src.read(1)
+    np.save(pred_stack, NDVI_pred)
+
+# === Load validation coordinates ===
+coords = np.load(VAL_PATH).astype(int)
+print(f"✅ Loaded {coords.shape[0]:,} validation samples")
+
+# === Extract true & predicted values ===
+yt = NDVI_true[coords[:,0], coords[:,1], coords[:,2]]
+yp = NDVI_pred[coords[:,0], coords[:,1], coords[:,2]]
+
+# === Scatter density plot & metrics calculation ===
+def density_scatter(y_t, y_p, out_fp):
+    mask = (~np.isnan(y_t)) & (~np.isnan(y_p))
+    y_t, y_p = y_t[mask], y_p[mask]
+
+    # Fixed coordinate range
+    vmin, vmax = -0.5, 1.0
+    H2d, _, _ = np.histogram2d(
+        y_t, y_p,
+        bins=200,
+        range=[[vmin, vmax], [vmin, vmax]]
+    )
+    H2d = gaussian_filter(H2d, sigma=1.0)
+
+    k, b   = np.polyfit(y_t, y_p, 1)
+    R2     = r2_score(y_t, y_p)
+    RMSE   = np.sqrt(mean_squared_error(y_t, y_p))
+    MAE    = mean_absolute_error(y_t, y_p)
+    N      = y_t.size
+
+    fig, ax = plt.subplots(figsize=(6,6), facecolor='white')
+    normc = Normalize(vmin=H2d.min(), vmax=H2d.max(), clip=False)
+    im = ax.imshow(
+        H2d.T,
+        origin='lower',
+        extent=[vmin, vmax, vmin, vmax],
+        cmap=cmap_white_jet,
+        norm=normc
+    )
+
+    ax.plot([vmin,vmax], [vmin,vmax], 'k--', lw=1)
+    ax.plot([vmin,vmax], [k*vmin+b, k*vmax+b], 'r-', lw=2)
+
+    ax.set_xlim(vmin, vmax)
+    ax.set_ylim(vmin, vmax)
+    ax.set_aspect('equal', adjustable='box')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.set_xticks(np.linspace(vmin, vmax, 4))
+    ax.set_yticks(np.linspace(vmin, vmax, 4))
+    ax.set_xlabel("True NDVI")
+    ax.set_ylabel("Predicted NDVI")
+
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("Counts in bin")
+
+    txt = (
+        f"y = {k:.3f}x + {b:.3f}\n"
+        f"R² = {R2:.3f}\n"
+        f"RMSE = {RMSE:.3f}\n"
+        f"MAE  = {MAE:.3f}"
+    )
+    ax.text(
+        0.02, 0.98, txt,
+        transform=ax.transAxes,
+        va='top', ha='left',
+        bbox=dict(facecolor='white', alpha=0.8, pad=4)
+    )
+
+    plt.tight_layout()
+    fig.savefig(out_fp, dpi=300)
+    plt.close(fig)
+
+    return N, R2, RMSE, MAE, k, b
+
+# === Per-date evaluation ===
+with open(PER_DATE_CSV, "w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["date","N","R2","RMSE","MAE","slope","intercept"])
+    for i, d in enumerate(tqdm(dates, desc="Per-date eval")):
+        idxs = np.where(coords[:,0]==i)[0]
+        if not idxs.size: continue
+        yt_i, yp_i = yt[idxs], yp[idxs]
+        N_i = (~np.isnan(yt_i) & ~np.isnan(yp_i)).sum()
+        if N_i == 0: continue
+        out_png = os.path.join(plots_dir, f"scatter_{d}.png")
+        N, R2, RMSE, MAE, k, b = density_scatter(yt_i, yp_i, out_png)
+        w.writerow([d, f"{N:,}", f"{R2:.3f}", f"{RMSE:.3f}", f"{MAE:.3f}", f"{k:.3f}", f"{b:.3f}"])
+
+# === Annual overall evaluation ===
+scatter_all = os.path.join(plots_dir, "scatter_year_all_SF.png")
+N_all, R2_all, RMSE_all, MAE_all, k_all, b_all = density_scatter(yt, yp, scatter_all)
+
+with open(METRICS_TXT, "w") as f:
+    f.write(f"y = {k_all:.3f}x + {b_all:.3f}\n")
+    f.write(f"R² = {R2_all:.3f}\n")
+    f.write(f"RMSE = {RMSE_all:.3f}\n")
+    f.write(f"MAE  = {MAE_all:.3f}\n")
+
+print("✅ Evaluation completed!")
+print("  • Per-date CSV:  ", PER_DATE_CSV)
+print("  • Annual metrics:", METRICS_TXT)
+print("  • Scatter plots: ", plots_dir)
