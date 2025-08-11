@@ -1,0 +1,70 @@
+import os
+import re
+import json
+from datetime import datetime, timedelta
+import pandas as pd
+
+# === Path configuration ===
+s1_dir = r"..."
+s2_usable_csv = r"..."  # ⇽ Usable S2 list (filtered by cloud & rain)
+out_json = r"..."
+
+max_delta_days = 7  # ⇽ Maximum allowed time difference (days)
+
+# === Extract S1 dates (from file name S1_yyyymmdd.tif) ===
+def extract_s1_dates(folder):
+    date_list = []
+    for fname in os.listdir(folder):
+        if fname.endswith(".tif") and fname.startswith("S1_"):
+            match = re.search(r"\d{8}", fname)
+            if match:
+                try:
+                    date = datetime.strptime(match.group(), "%Y%m%d")
+                    date_list.append(date)
+                except:
+                    continue
+    return sorted(date_list)
+
+# === Extract usable S2 dates (from cloud & rain filtered CSV) ===
+def extract_valid_s2_dates(csv_path):
+    df = pd.read_csv(csv_path)
+    df = df[df['status'] == 'usable']
+    dates = []
+    for d in df['date']:
+        try:
+            dates.append(datetime.strptime(d, "%Y-%m-%d"))
+        except:
+            continue
+    return sorted(dates)
+
+# === Perform matching (S1 as the reference axis) ===
+def match_dates(s1_dates, s2_dates, max_delta):
+    mapping = {}
+    for s1_date in s1_dates:
+        nearby = [s2 for s2 in s2_dates if abs((s2 - s1_date).days) <= max_delta]
+        if nearby:
+            best = min(nearby, key=lambda d: abs((d - s1_date).days))
+            mapping[s1_date.strftime("%Y%m%d")] = best.strftime("%Y%m%d")
+    return mapping
+
+# === Main process ===
+print("📂 Extracting S1 dates ...")
+s1_dates = extract_s1_dates(s1_dir)
+print(f"✅ Found {len(s1_dates)} S1 image dates")
+
+print("📄 Reading usable S2 dates (after cloud & rain filtering) ...")
+s2_dates = extract_valid_s2_dates(s2_usable_csv)
+print(f"✅ Retrieved {len(s2_dates)} usable S2 dates")
+
+print("🔗 Matching S1 ⇔ S2 ...")
+matched = match_dates(s1_dates, s2_dates, max_delta_days)
+
+print(f"\n✅ Successfully matched {len(matched)} S1 date samples")
+for k, v in list(matched.items())[:10]:
+    print(f"S1: {k} ← S2: {v}")
+
+# === Save JSON mapping ===
+with open(out_json, "w") as f:
+    json.dump(matched, f, indent=2)
+
+print(f"\n💾 Mapping results saved to: {out_json}")
