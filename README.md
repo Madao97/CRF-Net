@@ -1,4 +1,4 @@
-# CRF-Net
+<img width="3321" height="726" alt="1" src="https://github.com/user-attachments/assets/8e24a246-bc79-485f-b035-30e1c9b46037" /># CRF-Net
 
 Cloud-Resilient Fusion Network (CRF-Net)
 High-Resolution NDVI Reconstruction for Carbon Flux Assessment in Tropical Cloudy Regions
@@ -17,7 +17,6 @@ Cloud-Resilient Performance — Maintains R² > 0.82 and RMSE ≈ 0.11 in tropic
 Open Workflow — Fully compatible with Google Earth Engine preprocessing and standard geospatial libraries.
 
 Model Architecture
-<p align="center"> <img src="model_architecture.png" alt="CRF-Net Architecture" width="85%"> </p>
 The architecture consists of a dual-branch encoder (SAR branch + temporal modeling branch) and an attention-enhanced fusion module. The SAR branch captures spatial and backscatter dynamics, while the BiLSTM-Attention branch extracts sequential patterns from multi-temporal data. The fused representation is passed to a regression layer to produce the final NDVI reconstruction.
 
 Applications
